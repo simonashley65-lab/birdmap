@@ -240,7 +240,12 @@ function handleHash(){
   const h=location.hash.slice(1); if(!h) return; const m=h.match(/^(bg|yl|r)=(.*)$/s); if(!m) return;
   history.replaceState(null,'',location.pathname+location.search);
   try{
-    if(m[1]==='bg'){ const p=JSON.parse(decodeURIComponent(m[2])); importBG(p); loadBG(); buildSpecies(); render(); }
+    if(m[1]==='bg'){ const p=JSON.parse(decodeURIComponent(m[2]));
+      // pick the region whose site table matches the most reports, and switch to it if it isn't the current one
+      const counts=REGIONS.map(r=>({r,n:(p.records||[]).filter(x=>r.bgSites&&r.bgSites[x.si]).length})).sort((a,b)=>b.n-a.n);
+      const best=counts[0]&&counts[0].n?counts[0].r:REG;
+      if(best.id!==REG.id){ switchRegion(best.id).then(()=>{ importBG(p); loadBG(); buildSpecies(); render(); }); }
+      else { importBG(p); loadBG(); buildSpecies(); render(); } }
     else if(m[1]==='yl'){ importYear(decodeURIComponent(m[2]).split('|')); buildSpecies(); render(); }
     else if(m[1]==='r'){ switchRegion(m[2]); }
   }catch(e){ console.error(e); toast('Import failed: '+e.message,6000); }
