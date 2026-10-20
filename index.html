@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Birdmap</title>
+<meta name="description" content="Live bird sightings along a stretch of coast: BirdGuides and eBird, ranked against a year list.">
+<meta name="theme-color" content="#1f6f78">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Birdmap">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Bitter:wght@500;600&display=swap">
+<link rel="stylesheet" href="leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-pane="map">
+<header>
+  <select id="region" class="regsel" aria-label="Stretch of coast"></select>
+  <h1 id="h1"><span id="h1text">Birdmap</span><small id="subtitle">Live bird news · BirdGuides &amp; eBird · checked against Simon's 2026 UK year list</small></h1>
+  <span class="status" id="status"><span class="dotlive busy" id="livedot"></span><span id="livetext">Loading…</span><button type="button" id="refreshbtn">Refresh</button><a href="help.html" class="linkbtn" style="font-size:11.5px">Setup</a></span>
+  <button id="filtbtn" class="filtbtn" type="button" aria-expanded="false">Filters</button>
+  <div class="controls" id="controls">
+    <span><span class="lbl">Window</span><span class="seg" id="win">
+      <button data-h="36" aria-pressed="true">Last 36 h</button><button data-h="168" aria-pressed="false">Last 7 days</button></span></span>
+    <span><span class="lbl">Source</span><span class="seg" id="src">
+      <button data-s="all" aria-pressed="true">Both</button><button data-s="BG" aria-pressed="false">BirdGuides</button><button data-s="EB" aria-pressed="false">eBird</button></span></span>
+    <span><span class="lbl">My 2026 list</span><span class="seg" id="seen">
+      <button data-v="all" aria-pressed="true">All</button><button data-v="unseen" aria-pressed="false">Still to see</button><button data-v="seen" aria-pressed="false">Already seen</button></span></span>
+    <span class="rarpills" id="rar"></span>
+    <input id="q" type="search" placeholder="Find a species…" aria-label="Find a species">
+  </div>
+</header>
+<nav class="panetabs" id="panetabs"><button data-pane="map" aria-pressed="true" type="button">Map</button><button data-pane="list" data-view="species" aria-pressed="false" type="button">Species <span id="tabcount"></span></button><button data-pane="list" data-view="sites" aria-pressed="false" type="button">Where to go</button></nav>
+<main>
+  <div id="map"><div class="mapnote" id="mapnote" hidden></div><div class="selchip" id="selchip" hidden><span class="dot" id="chipdot"></span><span id="chipname"></span><button type="button" id="chiplist">Records</button><button type="button" id="chipclear">×</button></div></div>
+  <aside>
+    <div class="viewbar"><span class="seg" id="viewseg"><button data-v="species" aria-pressed="true" type="button">Species</button><button data-v="sites" aria-pressed="false" type="button">Where to go</button></span></div>
+    <div class="listhead" id="lh-species"><span><b id="nsp">0</b> species · <b id="nrec">0</b> records</span><span id="selnote">Tap a species to map it</span></div>
+    <div class="listhead" id="lh-sites" hidden><span id="siteshint">Sites ranked by species you still need</span><button id="gapsbtn" type="button" class="linkbtn" hidden>Use my 2026 gaps</button></div>
+    <div class="prog" id="prog" hidden></div>
+    <div id="list" role="listbox" aria-label="Species in taxonomic order"></div>
+    <div id="sites" hidden></div>
+    <section id="detail" hidden>
+      <div class="dhead"><span class="dot" id="ddot"></span><h2 id="dname"></h2><span class="grade" id="dgrade"></span><button id="dclose" type="button">Show all</button></div>
+      <div id="recs"></div>
+    </section>
+  </aside>
+</main>
+<div class="toast" id="toast" hidden></div>
+<script src="leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
