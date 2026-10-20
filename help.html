@@ -30,15 +30,16 @@ a{color:var(--accent)}
 
 <h2>2. BirdGuides bookmarklet</h2>
 <p>eBird is live, but BirdGuides needs your logged-in session, so the app imports it from a BirdGuides page you have open. Set this up once:</p>
-<div class="step"><b>a</b><span>Drag this link to your bookmarks bar on a Mac, <i>or</i> on the iPhone: bookmark this page, then edit the bookmark and replace its address with the code in the box below. Name it <code>bgx</code>.</span></div>
-<p><a class="bm" id="bmbg" href="#">Import BirdGuides → Birdmap</a></p>
+<div class="step"><b>a</b><span>On the iPhone: copy the code in the box below, bookmark any page, then edit that bookmark and paste the code in as its address. Name it <code>bgx</code>. (On a Mac you can drag the button below straight onto the Favourites bar instead. Tapping the button here runs it on this page, which does nothing useful.)</span></div>
+<p><a class="bm" id="bmbg" href="#">Import BirdGuides → Birdmap</a> <button type="button" class="linkbtn" data-copy="bgcode">Copy code</button></p>
 <textarea id="bgcode" readonly></textarea>
 <div class="step"><b>b</b><span>In Safari, open <a href="https://www.birdguides.com/sightings/" target="_blank" rel="noopener">BirdGuides sightings</a>, filter to the county and the last 7 days, set results to 1000, and Search.</span></div>
-<div class="step"><b>c</b><span>Tap the <code>bgx</code> bookmark. You'll land back in Birdmap with the new reports merged in. Sightings at sites the app doesn't have coordinates for are skipped and listed in the message.</span></div>
+<div class="step"><b>c</b><span>Run the bookmark on that page. In <b>Safari</b>: open Bookmarks and tap <code>bgx</code>. In <b>Chrome</b>: tap the address bar, type <code>bgx</code>, and tap the bookmark in the suggestions. You'll land back in Birdmap with the new reports merged in; sightings at sites the app has no coordinates for are skipped and named in the message.</span></div>
 
 <h2>3. Year list bookmarklet</h2>
 <p>Open your <a href="https://ebird.org/lifelist/GB?time=year" target="_blank" rel="noopener">eBird year list</a> in Safari and tap this bookmark; it sends the species to the app so "Still to see" stays current as you add birds.</p>
-<p><a class="bm" id="bmyl" href="#">Update year list → Birdmap</a></p>
+<p><a class="bm" id="bmyl" href="#">Update year list → Birdmap</a> <button type="button" class="linkbtn" data-copy="ylcode">Copy code</button></p>
+<p class="muted">Save it as a bookmark named <code>ylx</code> the same way, and run it on the year-list page (Safari: Bookmarks → ylx; Chrome: type ylx in the address bar).</p>
 <textarea id="ylcode" readonly></textarea>
 
 <h2>Notes</h2>
@@ -50,6 +51,7 @@ const bg=`javascript:(function(){var A=${JSON.stringify(APP)};var rs=[].map.call
 const yl=`javascript:(function(){var A=${JSON.stringify(APP)};var t=document.body.innerText.split('\\n');var s=[];for(var i=0;i<t.length;i++){var x=t[i].trim();if(/^[A-Z][a-z]+ [a-z]+$/.test(x))s.push(x);}s=s.filter(function(v,i,a){return a.indexOf(v)===i});if(s.length<5){alert('No species found — open your eBird year list page first');return;}location.href=A+'#yl='+encodeURIComponent(s.join('|'));})();`;
 document.getElementById('bmbg').href=bg; document.getElementById('bgcode').value=bg;
 document.getElementById('bmyl').href=yl; document.getElementById('ylcode').value=yl;
+document.querySelectorAll('[data-copy]').forEach(b=>b.addEventListener('click',async()=>{ const ta=document.getElementById(b.dataset.copy); try{ await navigator.clipboard.writeText(ta.value); b.textContent='Copied'; }catch(e){ ta.focus(); ta.select(); b.textContent='Select all & copy'; } }));
 </script>
 </body>
 </html>

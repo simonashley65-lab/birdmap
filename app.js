@@ -122,10 +122,13 @@ function buildSpecies(){
 let map, markers, labels, HOME, landLayer=[];
 function initMap(){
   map=L.map('map',{zoomSnap:.5}); map.attributionControl.setPrefix('');
-  const tiles=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:18,opacity:.9,attribution:'© OpenStreetMap contributors © CARTO · sightings © BirdGuides &amp; eBird'});
-  tiles.on('tileerror',()=>{ const n=$('mapnote'); if(!navigator.onLine){ n.textContent='Offline — showing the coastline only.'; n.hidden=false; } });
-  tiles.on('tileload',()=>{ $('mapnote').hidden=true; });
-  tiles.addTo(map); markers=L.layerGroup().addTo(map); labels=L.layerGroup().addTo(map);
+  const osm=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,opacity:.9,attribution:'© OpenStreetMap contributors · sightings © BirdGuides &amp; eBird'});
+  const esri=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:.9,attribution:'Tiles © Esri · sightings © BirdGuides &amp; eBird'});
+  let errs=0, swapped=false;
+  osm.on('tileerror',()=>{ errs++; const n=$('mapnote'); if(!navigator.onLine){ n.textContent='Offline — showing the coastline only.'; n.hidden=false; return; } if(errs>=4&&!swapped){ swapped=true; map.removeLayer(osm); esri.addTo(map); } });
+  osm.on('tileload',()=>{ $('mapnote').hidden=true; });
+  esri.on('tileload',()=>{ $('mapnote').hidden=true; });
+  osm.addTo(map); markers=L.layerGroup().addTo(map); labels=L.layerGroup().addTo(map);
   map.on('zoomend',()=>{ const z=map.getZoom(); labels.getLayers().forEach(l=>l.getElement()&&(l.getElement().style.display=z>=10?'':'none')); });
 }
 function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
