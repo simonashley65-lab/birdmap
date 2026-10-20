@@ -62,7 +62,14 @@ async function ensureFull(codes, onProgress){
   mergeFull();
 }
 function mergeFull(){ const back=backDays(); const ids=new Set(ebRecords.map(r=>r.id)); Object.entries(ebFull).forEach(([k,rs])=>{ if(!k.endsWith(':'+back)) return; rs.forEach(r=>{ if(!ids.has(r.id)){ ids.add(r.id); ebRecords.push(r); } }); }); }
-function setLive(cls,txt){ $('livedot').className='dotlive '+(cls==='ok'?'':cls); $('livetext').textContent=txt+(REG&&REG.bg?` · BirdGuides ${fmt(bgAsOf())}`:''); }
+function setLive(cls,txt){ $('livedot').className='dotlive '+(cls==='ok'?'':cls); $('livetext').textContent=txt+(REG&&REG.bg?` · BirdGuides ${fmt(bgAsOf())}`:''); bgStaleCheck(); }
+// Warn when the newest BirdGuides report held is more than a day old
+function bgStaleCheck(){
+  const bar=$('bgstale'); if(!bar||!REG) return;
+  const ageH=(Date.now()-Date.parse(bgAsOf()))/3600e3;
+  if(ageH>24){ bar.hidden=false; bar.innerHTML=`BirdGuides reports are ${ageH<48?Math.round(ageH)+' hours':Math.round(ageH/24)+' days'} old — open the BirdGuides sightings page and run <b>bgx</b> to top up. <a href="help.html">How</a>`; }
+  else bar.hidden=true;
+}
 function bgAsOf(){ let a=REG.bg.asOf; try{ const imp=JSON.parse(localStorage.getItem(lsKey()+':bg')||'null'); if(imp&&imp.asOf>a) a=imp.asOf; }catch(e){} return a; }
 
 // BirdGuides: snapshot + any phone import, de-duplicated by sighting id
