@@ -81,25 +81,36 @@ function loadBG(){
 }
 // Import from the BirdGuides bookmarklet: #bg=<json>
 function importBG(payload){
-  const sites=REG.bgSites||{}; const yr=new Date().getFullYear(); const recs=[]; const unknownSites={}; const unknownSp={};
-  (payload.records||[]).forEach(r=>{
-    const siteKey=Object.keys(sites).find(s=>s===r.si) ; if(!siteKey){ unknownSites[r.si]=(unknownSites[r.si]||0)+1; return; }
-    const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); const SCIFIX={'hydrobates leucorhoa':'hydrobates leucorhous'}; const t=BYSCI[SCIFIX[sci]||sci]||(TAX[({'large shearwater sp':'lrgshe1','large auk sp':'alcid1','barolo-type shearwater':'barshe2','subalpine warbler sp':'subwar1'})[(r.sp||'').toLowerCase()]]); if(!t){ unknownSp[r.sp]=1; return; }
-    const isSub=parts.length>2 && !/^(sp|type)$/.test(parts[2]); const key=t.c+(isSub?'|'+r.sp:'');
-    const [tm,dm]=r.t.split(' '); const [dd,mm]=dm.split('/');
-    recs.push({id:r.id,key,name:r.sp,site:siteKey,lat:sites[siteKey][0],lon:sites[siteKey][1],dt:`${yr}-${mm}-${dd}T${tm}`,obs:r.o||'',notes:r.n||'',flags:r.f||'',url:`https://www.birdguides.com/sightings/${r.g}/${r.id}/`});
+  // Feed every stretch that has reports in the page; returns per-region counts
+  const yr=new Date().getFullYear(); const unknownSites={}; const unknownSp={}; const result={};
+  const SCIFIX={'hydrobates leucorhoa':'hydrobates leucorhous'}; const SPFIX={'large shearwater sp':'lrgshe1','large auk sp':'alcid1','barolo-type shearwater':'barshe2','subalpine warbler sp':'subwar1'};
+  const matchedAny=new Set();
+  REGIONS.forEach(reg=>{
+    const sites=reg.bgSites||{}; const recs=[];
+    (payload.records||[]).forEach((r,i)=>{
+      if(!sites[r.si]) return; matchedAny.add(i);
+      const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); const t=BYSCI[SCIFIX[sci]||sci]||TAX[SPFIX[(r.sp||'').toLowerCase()]]; if(!t){ unknownSp[r.sp]=1; return; }
+      const isSub=parts.length>2 && !/^(sp|type)$/.test(parts[2]); const key=t.c+(isSub?'|'+r.sp:'');
+      const [tm,dm]=r.t.split(' '); const [dd,mm]=dm.split('/');
+      recs.push({id:r.id,key,name:r.sp,site:r.si,lat:sites[r.si][0],lon:sites[r.si][1],dt:`${yr}-${mm}-${dd}T${tm}`,obs:r.o||'',notes:r.n||'',flags:r.f||'',url:`https://www.birdguides.com/sightings/${r.g}/${r.id}/`});
+    });
+    if(!recs.length){ result[reg.id]={added:0,matched:0}; return; }
+    const k='birdmap:'+reg.id+':bg';
+    let store={asOf:'',records:[],grades:{}};
+    try{ store=Object.assign(store,JSON.parse(localStorage.getItem(k)||'{}')); }catch(e){}
+    const ids=new Set(store.records.map(r=>r.id)); let added=0; recs.forEach(r=>{ if(!ids.has(r.id)){ store.records.push(r); added++; } });
+    const newest=recs.reduce((m,r)=>r.dt>m?r.dt:m,''); if(newest>(store.asOf||'')) store.asOf=newest;
+    const cut=Date.now()-10*864e5; store.records=store.records.filter(r=>Date.parse(r.dt)>=cut);
+    try{ localStorage.setItem(k,JSON.stringify(store)); }catch(e){ toast('Import too large to store'); }
+    result[reg.id]={added,matched:recs.length};
   });
-  let store={asOf:payload.asOf||new Date().toISOString(),records:[],grades:{}};
-  try{ store=Object.assign(store,JSON.parse(localStorage.getItem(lsKey()+':bg')||'{}')); }catch(e){}
-  const ids=new Set(store.records.map(r=>r.id)); let added=0; recs.forEach(r=>{ if(!ids.has(r.id)){ store.records.push(r); added++; } });
-  if(recs.length){ const newest=recs.reduce((m,r)=>r.dt>m?r.dt:m,''); if(newest>(store.asOf||'')) store.asOf=newest; }
-  // keep the store to the last 10 days
-  const cut=Date.now()-10*864e5; store.records=store.records.filter(r=>Date.parse(r.dt)>=cut);
-  try{ localStorage.setItem(lsKey()+':bg',JSON.stringify(store)); }catch(e){ toast('Import too large to store'); }
-  const us=Object.entries(unknownSites); let msg=`BirdGuides import: ${added} new of ${recs.length} matched`;
-  if(us.length) msg+=` · ${us.reduce((a,[,n])=>a+n,0)} skipped at sites without coordinates (${us.slice(0,3).map(([s])=>s).join(', ')}${us.length>3?'…':''})`;
+  (payload.records||[]).forEach((r,i)=>{ if(!matchedAny.has(i)) unknownSites[r.si]=(unknownSites[r.si]||0)+1; });
+  const parts=REGIONS.filter(r=>result[r.id]&&result[r.id].matched).map(r=>`${r.h1}: ${result[r.id].added} new of ${result[r.id].matched}`);
+  const us=Object.entries(unknownSites); let msg='BirdGuides import — '+(parts.length?parts.join(' · '):'nothing matched');
+  if(us.length) msg+=` · ${us.reduce((a,[,n])=>a+n,0)} skipped elsewhere`;
   if(Object.keys(unknownSp).length) msg+=` · unmatched: ${Object.keys(unknownSp).join(', ')}`;
-  toast(msg, 8000); console.log(msg, unknownSites, unknownSp);
+  toast(msg, 9000); console.log(msg, unknownSites, unknownSp);
+  return result;
 }
 function importYear(scis){ const codes=new Set(YEAR); let n=0; scis.forEach(s=>{ const t=BYSCI[s.toLowerCase()]; if(t&&!codes.has(t.c)){ codes.add(t.c); n++; } }); try{ localStorage.setItem('birdmap:yearlist',JSON.stringify({asOf:new Date().toISOString(),codes:[...codes]})); }catch(e){} YEAR=codes; toast(`Year list updated: ${n} new, ${codes.size} total`,6000); }
 
@@ -250,12 +261,10 @@ function handleHash(){
   const h=location.hash.slice(1); if(!h) return; const m=h.match(/^(bg|yl|r)=(.*)$/s); if(!m) return;
   history.replaceState(null,'',location.pathname+location.search);
   try{
-    if(m[1]==='bg'){ const p=JSON.parse(decodeURIComponent(m[2]));
-      // pick the region whose site table matches the most reports, and switch to it if it isn't the current one
-      const counts=REGIONS.map(r=>({r,n:(p.records||[]).filter(x=>r.bgSites&&r.bgSites[x.si]).length})).sort((a,b)=>b.n-a.n);
-      const best=counts[0]&&counts[0].n?counts[0].r:REG;
-      if(best.id!==REG.id){ switchRegion(best.id).then(()=>{ importBG(p); loadBG(); buildSpecies(); render(); }); }
-      else { importBG(p); loadBG(); buildSpecies(); render(); } }
+    if(m[1]==='bg'){ const p=JSON.parse(decodeURIComponent(m[2])); const res=importBG(p);
+      // stay on the current stretch if it got reports; otherwise go to the stretch that did
+      const cur=res[REG.id]&&res[REG.id].matched; const best=REGIONS.filter(r=>res[r.id]&&res[r.id].matched).sort((a,b)=>res[b.id].matched-res[a.id].matched)[0];
+      if(!cur && best && best.id!==REG.id){ switchRegion(best.id); } else { loadBG(); buildSpecies(); render(); } }
     else if(m[1]==='yl'){ importYear(decodeURIComponent(m[2]).split('|')); buildSpecies(); render(); }
     else if(m[1]==='r'){ switchRegion(m[2]); }
   }catch(e){ console.error(e); toast('Import failed: '+e.message,6000); }
