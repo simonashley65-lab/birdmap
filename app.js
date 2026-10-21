@@ -92,7 +92,7 @@ function importBG(payload){
   let store={asOf:payload.asOf||new Date().toISOString(),records:[],grades:{}};
   try{ store=Object.assign(store,JSON.parse(localStorage.getItem(lsKey()+':bg')||'{}')); }catch(e){}
   const ids=new Set(store.records.map(r=>r.id)); let added=0; recs.forEach(r=>{ if(!ids.has(r.id)){ store.records.push(r); added++; } });
-  store.asOf=payload.asOf||new Date().toISOString();
+  if(recs.length){ const newest=recs.reduce((m,r)=>r.dt>m?r.dt:m,''); if(newest>(store.asOf||'')) store.asOf=newest; }
   // keep the store to the last 10 days
   const cut=Date.now()-10*864e5; store.records=store.records.filter(r=>Date.parse(r.dt)>=cut);
   try{ localStorage.setItem(lsKey()+':bg',JSON.stringify(store)); }catch(e){ toast('Import too large to store'); }
