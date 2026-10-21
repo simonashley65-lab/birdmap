@@ -84,7 +84,7 @@ function importBG(payload){
   const sites=REG.bgSites||{}; const yr=new Date().getFullYear(); const recs=[]; const unknownSites={}; const unknownSp={};
   (payload.records||[]).forEach(r=>{
     const siteKey=Object.keys(sites).find(s=>s===r.si) ; if(!siteKey){ unknownSites[r.si]=(unknownSites[r.si]||0)+1; return; }
-    const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); const t=BYSCI[sci]; if(!t){ unknownSp[r.sp]=1; return; }
+    const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); const SCIFIX={'hydrobates leucorhoa':'hydrobates leucorhous'}; const t=BYSCI[SCIFIX[sci]||sci]||(TAX[({'large shearwater sp':'lrgshe1','large auk sp':'alcid1','barolo-type shearwater':'barshe2','subalpine warbler sp':'subwar1'})[(r.sp||'').toLowerCase()]]); if(!t){ unknownSp[r.sp]=1; return; }
     const isSub=parts.length>2 && !/^(sp|type)$/.test(parts[2]); const key=t.c+(isSub?'|'+r.sp:'');
     const [tm,dm]=r.t.split(' '); const [dd,mm]=dm.split('/');
     recs.push({id:r.id,key,name:r.sp,site:siteKey,lat:sites[siteKey][0],lon:sites[siteKey][1],dt:`${yr}-${mm}-${dd}T${tm}`,obs:r.o||'',notes:r.n||'',flags:r.f||'',url:`https://www.birdguides.com/sightings/${r.g}/${r.id}/`});
