@@ -28,8 +28,24 @@ async function ebird(path, params={}){
 }
 function inBox(lat,lon){ const b=REG.bbox; return lat>=b[0]&&lat<=b[1]&&lon>=b[2]&&lon<=b[3]; }
 const excludeRe=()=>REG.exclude?new RegExp(REG.exclude,'i'):null;
-function ebToRec(o){ return {src:'EB', key:o.speciesCode, name:o.comName, site:o.locName, lat:o.lat, lon:o.lng, dt:o.obsDt.replace(' ','T'), obs:'', notes:(o.userDisplayName?'Checklist by '+o.userDisplayName:'')+(o.obsValid===false?' · not yet reviewed':''), flags:o.obsValid===false&&o.obsReviewed===false?'Unconfirmed':'', url:'https://ebird.org/checklist/'+o.subId, count:o.howMany?String(o.howMany):'', id:o.subId+'|'+o.speciesCode+'|'+o.locId};
+function ebToRec(o){ return {src:'EB', key:o.speciesCode, name:o.comName, exo:o.exoticCategory||'', site:o.locName, lat:o.lat, lon:o.lng, dt:o.obsDt.replace(' ','T'), obs:'', notes:(o.userDisplayName?'Checklist by '+o.userDisplayName:'')+(o.obsValid===false?' · not yet reviewed':'')+(o.exoticCategory==='X'?' · escape':''), flags:o.obsValid===false&&o.obsReviewed===false?'Unconfirmed':'', url:'https://ebird.org/checklist/'+o.subId, count:o.howMany?String(o.howMany):'', id:o.subId+'|'+o.speciesCode+'|'+o.locId};
 }
+// eBird codes missing from the bundled taxonomy (subspecies groups, slashes, spuhs…) are looked up live; subspecies
+// fold under their parent species (key parent|name) so year-list / lifer status comes from the species.
+async function resolveCodes(recs){
+  const lookup=async codes=>{ const tx=await ebird('/ref/taxonomy/ebird',{species:codes.join(','),fmt:'json',locale:'en_UK'});
+    tx.forEach(t=>{ TAX[t.speciesCode]={c:t.speciesCode,n:t.comName,s:t.sciName,o:t.taxonOrder,f:t.familyComName,cat:t.category,parent:t.reportAs&&t.reportAs!==t.speciesCode?t.reportAs:''}; BYSCI[t.sciName.toLowerCase()]=BYSCI[t.sciName.toLowerCase()]||TAX[t.speciesCode]; }); };
+  const todo=[...new Set(recs.map(r=>r.key).filter(c=>!c.includes('|')&&!TAX[c]))];
+  if(todo.length){
+    try{ await lookup(todo);
+      const parents=[...new Set(todo.map(c=>TAX[c]&&TAX[c].parent).filter(p=>p&&!TAX[p]))]; if(parents.length) await lookup(parents);
+    }catch(e){ console.warn('taxonomy lookup failed',e); }
+    todo.forEach(c=>{ if(!TAX[c]){ const r=recs.find(x=>x.key===c); TAX[c]={c,n:r?r.name:c,o:99999,f:'Other',cat:'unknown'}; } });
+  }
+  recs.forEach(r=>{ const t=TAX[r.key]; if(t&&t.parent&&TAX[t.parent]&&(t.cat==='issf'||t.cat==='form')) r.key=t.parent+'|'+t.n; });
+  return recs;
+}
+function countable(code, recs){ const t=TAX[code]||{}; if(t.cat&&t.cat!=='species') return false; if(/\bsp\.?$| sp$|\/|hybrid|domestic|\(domestic/i.test(t.n||'')) return false; const eb=recs.filter(r=>r.src==='EB'); if(eb.length&&eb.every(r=>r.exo==='X'||r.exo==='P')) return false; return true; }
 function keep(r){ const ex=excludeRe(); return inBox(r.lat,r.lon) && !(ex&&ex.test(r.site)); }
 function backDays(){ return state.hours>48?7:2; }
 let liveCache={};   // key: back -> {recent:[], notable:[]}
@@ -49,6 +65,7 @@ async function loadLive(force){
     const seen={}; const out=[];
     notable.map(ebToRec).concat(recent.map(ebToRec)).forEach(r=>{ if(!keep(r)) return; if(seen[r.id]) return; seen[r.id]=1; out.push(r); });
     // species for which we only hold the latest record (from /recent) need a per-species fetch before mapping
+    await resolveCodes(out);
     ebRecords=out; nowMs=Math.max(Date.now(), ...out.map(r=>Date.parse(r.dt)).filter(Boolean));
     setLive('ok',`eBird live ${fmt(new Date(at).toISOString())}`);
   }catch(e){ console.error(e); setLive('err','eBird unavailable — showing BirdGuides only'); ebRecords=[]; }
@@ -57,7 +74,7 @@ async function ensureFull(codes, onProgress){
   const back=backDays(); const todo=codes.filter(c=>!c.includes('|') && !ebFull[c+':'+back]);
   if(!todo.length) return;
   let done=0; const queue=todo.slice(); const workers=[];
-  const run=async()=>{ while(queue.length){ const c=queue.shift(); try{ const rs=[]; for(const rc of REG.ebird){ rs.push(...await ebird(`/data/obs/${rc}/recent/${c}`,{back,includeProvisional:true})); } ebFull[c+':'+back]=rs.map(ebToRec).filter(keep); }catch(e){ ebFull[c+':'+back]=[]; } done++; onProgress&&onProgress(done,todo.length); } };
+  const run=async()=>{ while(queue.length){ const c=queue.shift(); try{ const rs=[]; for(const rc of REG.ebird){ rs.push(...await ebird(`/data/obs/${rc}/recent/${c}`,{back,includeProvisional:true})); } ebFull[c+':'+back]=await resolveCodes(rs.map(ebToRec).filter(keep)); }catch(e){ ebFull[c+':'+back]=[]; } done++; onProgress&&onProgress(done,todo.length); } };
   for(let i=0;i<5;i++) workers.push(run()); await Promise.all(workers);
   mergeFull();
 }
@@ -121,10 +138,11 @@ function buildSpecies(){
   const keys=[...new Set(all.map(r=>r.key))];
   gradeOf={}; nameOf={}; seenOf={}; liferOf={};
   SPECIES=keys.map(k=>{ const code=k.split('|')[0]; const sub=k.includes('|'); const t=TAX[code]||{n:code,o:99999,f:'Other'};
-    const name= sub ? k.split('|')[1] : (t.n||all.find(r=>r.key===k).name);
+    const recs=all.filter(r=>r.key===k);
+    const name= sub ? k.split('|')[1] : ((TAX[code]&&TAX[code].n)||recs[0].name||code);
     const rarity=REG._grades[k]||REG._grades[code]||'Common';
     const seen=YEAR.has(code);
-    const lifer=LIFE.size>0 && !LIFE.has(code);
+    const lifer=LIFE.size>0 && !LIFE.has(code) && countable(code,recs);
     gradeOf[k]=rarity; nameOf[k]=name; seenOf[k]=seen; liferOf[k]=lifer;
     return {key:k, code, name, rarity, seen, lifer, o:(t.o||99999)+(sub?0.5:0), fam:FAMNAME[t.f]||t.f||'Other'};
   }).sort((a,b)=>a.o-b.o);
@@ -138,20 +156,24 @@ function initMap(){
   const osm=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,opacity:.9,attribution:'© OpenStreetMap contributors · sightings © BirdGuides &amp; eBird'});
   const esri=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',{maxZoom:18,opacity:.9,attribution:'Tiles © Esri · sightings © BirdGuides &amp; eBird'});
   let errs=0, swapped=false;
-  osm.on('tileerror',()=>{ errs++; const n=$('mapnote'); if(!navigator.onLine){ n.textContent='Offline — showing the coastline only.'; n.hidden=false; return; } if(errs>=4&&!swapped){ swapped=true; map.removeLayer(osm); esri.addTo(map); } });
-  osm.on('tileload',()=>{ $('mapnote').hidden=true; });
-  esri.on('tileload',()=>{ $('mapnote').hidden=true; });
+  osm.on('tileerror',()=>{ errs++; const n=$('mapnote'); if(!navigator.onLine){ n.textContent='Offline — showing the coastline only.'; n.hidden=false; if(tilesOk){ tilesOk=false; styleLand(); } return; } if(errs>=4&&!swapped){ swapped=true; map.removeLayer(osm); esri.addTo(map); } });
+  const ok=()=>{ $('mapnote').hidden=true; if(!tilesOk){ tilesOk=true; styleLand(); } };
+  osm.on('tileload',ok); esri.on('tileload',ok);
   osm.addTo(map); markers=L.layerGroup().addTo(map); labels=L.layerGroup().addTo(map);
   map.on('zoomend',()=>{ const z=map.getZoom(); labels.getLayers().forEach(l=>l.getElement()&&(l.getElement().style.display=z>=10?'':'none')); });
 }
 function getCSS(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
 function setRegionMap(){
   landLayer.forEach(l=>map.removeLayer(l)); landLayer=[]; labels.clearLayers();
-  const land=L.polygon(REG.land.map(p=>[p[1],p[0]]),{color:'transparent',fillColor:getCSS('--land'),fillOpacity:1,interactive:false}).addTo(map); landLayer.push(land);
-  REG.islands.forEach(i=>{ const l=L.polygon(i.map(p=>[p[1],p[0]]),{color:'transparent',fillColor:getCSS('--land'),fillOpacity:1,interactive:false}).addTo(map); landLayer.push(l); });
+  // Coastline polygon: solid fill only when tiles are unavailable (offline); otherwise a faint outline over the real map
+  const land=L.polygon(REG.land.map(p=>[p[1],p[0]]),{interactive:false}).addTo(map); landLayer.push(land);
+  REG.islands.forEach(i=>{ const l=L.polygon(i.map(p=>[p[1],p[0]]),{interactive:false}).addTo(map); landLayer.push(l); });
+  styleLand();
   REG.labels.forEach(([n,la,lo])=>L.marker([la,lo],{icon:L.divIcon({className:'sitelabel',html:n,iconAnchor:[-6,-6]}),interactive:false,keyboard:false}).addTo(labels));
   HOME=L.latLngBounds(REG.home); map.fitBounds(HOME);
 }
+let tilesOk=false;
+function styleLand(){ const st=tilesOk?{color:getCSS('--accent'),weight:1,opacity:.25,fillOpacity:0}:{color:'transparent',fillColor:getCSS('--land'),fillOpacity:1}; landLayer.forEach(l=>l.setStyle(st)); }
 function drawMarkers(recs, single){
   markers.clearLayers(); const g={};
   recs.forEach(r=>{ const k=r.lat.toFixed(4)+','+r.lon.toFixed(4); (g[k]=g[k]||{lat:r.lat,lon:r.lon,rs:[],sites:new Set()}).rs.push(r); g[k].sites.add(r.site); });
