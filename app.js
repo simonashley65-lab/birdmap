@@ -17,7 +17,7 @@ let bgRecords=[], ebRecords=[], ebFull={}, SPECIES=[], order={}, gradeOf={}, nam
 let nowMs=Date.now();
 const state={hours:36, src:'all', grades:new Set(GRADES), q:'', sel:null, seen:'all', view:'species', area:null, skipped:new Set()};
 const lsKey=()=>'birdmap:'+REG.id;
-function loadPrefs(){ try{ const s=JSON.parse(localStorage.getItem(lsKey())||'{}'); if(s.hours===36||s.hours===168) state.hours=s.hours; if(s.src) state.src=s.src; if(['all','unseen','seen','lifer'].includes(s.seen)) state.seen=s.seen; state.skipped=new Set(JSON.parse(localStorage.getItem(lsKey()+':skip')||'[]')); }catch(e){} }
+function loadPrefs(){ if(REG.defaultSeen) state.seen=REG.defaultSeen; try{ const s=JSON.parse(localStorage.getItem(lsKey())||'{}'); if(s.hours===36||s.hours===168) state.hours=s.hours; if(s.src) state.src=s.src; if(['all','unseen','seen','lifer'].includes(s.seen)) state.seen=s.seen; state.skipped=new Set(JSON.parse(localStorage.getItem(lsKey()+':skip')||'[]')); }catch(e){} }
 function savePrefs(){ try{ localStorage.setItem(lsKey(),JSON.stringify({hours:state.hours,src:state.src,seen:state.seen})); localStorage.setItem(lsKey()+':skip',JSON.stringify([...state.skipped])); }catch(e){} }
 
 // ---------- data loading ----------
@@ -26,7 +26,8 @@ async function ebird(path, params={}){
   const u=new URL(API+path); Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,v)); u.searchParams.set('sppLocale','en_UK');
   const r=await fetch(u,{headers:{'X-eBirdApiToken':API_KEY}}); if(!r.ok) throw new Error('eBird '+r.status); return r.json();
 }
-function inBox(lat,lon){ const b=REG.bbox; return lat>=b[0]&&lat<=b[1]&&lon>=b[2]&&lon<=b[3]; }
+function inBox(lat,lon){ if(lat==null) return true; const b=REG.bbox; return lat>=b[0]&&lat<=b[1]&&lon>=b[2]&&lon<=b[3]; }
+const hasPos=r=>r.lat!=null&&r.lon!=null;
 const excludeRe=()=>REG.exclude?new RegExp(REG.exclude,'i'):null;
 function ebToRec(o){ return {src:'EB', key:o.speciesCode, name:o.comName, exo:o.exoticCategory||'', site:o.locName, lat:o.lat, lon:o.lng, dt:o.obsDt.replace(' ','T'), obs:'', notes:(o.userDisplayName?'Checklist by '+o.userDisplayName:'')+(o.obsValid===false?' · not yet reviewed':'')+(o.exoticCategory==='X'?' · escape':''), flags:o.obsValid===false&&o.obsReviewed===false?'Unconfirmed':'', url:'https://ebird.org/checklist/'+o.subId, count:o.howMany?String(o.howMany):'', id:o.subId+'|'+o.speciesCode+'|'+o.locId};
 }
@@ -56,7 +57,7 @@ async function loadLive(force){
     if(force||!liveCache[ck]){
       const recent=[], notable=[];
       for(const rc of REG.ebird){
-        const [a,b]=await Promise.all([ebird(`/data/obs/${rc}/recent`,{back,includeProvisional:true}), ebird(`/data/obs/${rc}/recent/notable`,{back,detail:'full'})]);
+        const [a,b]=await Promise.all([REG.notableOnly?Promise.resolve([]):ebird(`/data/obs/${rc}/recent`,{back,includeProvisional:true}), ebird(`/data/obs/${rc}/recent/notable`,{back,detail:'full'})]);
         recent.push(...a); notable.push(...b);
       }
       liveCache[ck]={recent,notable,at:Date.now()}; ebFull={};
@@ -72,7 +73,7 @@ async function loadLive(force){
 }
 async function ensureFull(codes, onProgress){
   const back=backDays(); const todo=codes.filter(c=>!c.includes('|') && !ebFull[c+':'+back]);
-  if(!todo.length) return;
+  if(!todo.length || REG.notableOnly) return;   // notable feed already carries every record
   let done=0; const queue=todo.slice(); const workers=[];
   const run=async()=>{ while(queue.length){ const c=queue.shift(); try{ const rs=[]; for(const rc of REG.ebird){ rs.push(...await ebird(`/data/obs/${rc}/recent/${c}`,{back,includeProvisional:true})); } ebFull[c+':'+back]=await resolveCodes(rs.map(ebToRec).filter(keep)); }catch(e){ ebFull[c+':'+back]=[]; } done++; onProgress&&onProgress(done,todo.length); } };
   for(let i=0;i<5;i++) workers.push(run()); await Promise.all(workers);
@@ -102,11 +103,12 @@ function importBG(payload){
   const yr=new Date().getFullYear(); const unknownSites={}; const unknownSp={}; const result={};
   const SCIFIX={'hydrobates leucorhoa':'hydrobates leucorhous'}; const SPFIX={'large shearwater sp':'lrgshe1','large auk sp':'alcid1','barolo-type shearwater':'barshe2','subalpine warbler sp':'subwar1'};
   const matchedAny=new Set();
+  const anySite=n=>{ for(const reg of REGIONS){ if(reg.bgSites&&reg.bgSites[n]) return reg.bgSites[n]; } return [null,null]; };
   REGIONS.forEach(reg=>{
-    const sites=reg.bgSites||{}; const recs=[];
+    const sites=reg.national?new Proxy({},{get:(_,n)=>anySite(n)}):(reg.bgSites||{}); const recs=[];
     (payload.records||[]).forEach((r,i)=>{
-      if(!sites[r.si]) return; matchedAny.add(i);
-      const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); const t=BYSCI[SCIFIX[sci]||sci]||TAX[SPFIX[(r.sp||'').toLowerCase()]]; if(!t){ unknownSp[r.sp]=1; return; }
+      if(!reg.national && !sites[r.si]) return; if(!reg.national) matchedAny.add(i);
+      const parts=(r.g||'').split('-'); const sci=(parts[0]+' '+(parts[1]||'')).toLowerCase(); let t=BYSCI[SCIFIX[sci]||sci]||TAX[SPFIX[(r.sp||'').toLowerCase()]]; if(!t){ if(!reg.national){ unknownSp[r.sp]=1; return; } t=TAX['x-'+r.g]||(TAX['x-'+r.g]={c:'x-'+r.g,n:r.sp,s:sci,o:99998,f:'Other',cat:'species'}); }
       const isSub=parts.length>2 && !/^(sp|type)$/.test(parts[2]); const key=t.c+(isSub?'|'+r.sp:'');
       const [tm,dm]=r.t.split(' '); const [dd,mm]=dm.split('/');
       recs.push({id:r.id,key,name:r.sp,site:r.si,lat:sites[r.si][0],lon:sites[r.si][1],dt:`${yr}-${mm}-${dd}T${tm}`,obs:r.o||'',notes:r.n||'',flags:r.f||'',url:`https://www.birdguides.com/sightings/${r.g}/${r.id}/`});
@@ -115,7 +117,7 @@ function importBG(payload){
     const k='birdmap:'+reg.id+':bg';
     let store={asOf:'',records:[],grades:{}};
     try{ store=Object.assign(store,JSON.parse(localStorage.getItem(k)||'{}')); }catch(e){}
-    const ids=new Set(store.records.map(r=>r.id)); let added=0; recs.forEach(r=>{ if(!ids.has(r.id)){ store.records.push(r); added++; } });
+    const ids=new Set(store.records.map(r=>r.id)); let added=0; recs.forEach(r=>{ if(!ids.has(r.id)){ store.records.push(r); added++; } if(r.flags==='Mega') store.grades[r.key]='Mega'; });
     const newest=recs.reduce((m,r)=>r.dt>m?r.dt:m,''); if(newest>(store.asOf||'')) store.asOf=newest;
     const cut=Date.now()-10*864e5; store.records=store.records.filter(r=>Date.parse(r.dt)>=cut);
     try{ localStorage.setItem(k,JSON.stringify(store)); }catch(e){ toast('Import too large to store'); }
@@ -124,7 +126,7 @@ function importBG(payload){
   (payload.records||[]).forEach((r,i)=>{ if(!matchedAny.has(i)) unknownSites[r.si]=(unknownSites[r.si]||0)+1; });
   const parts=REGIONS.filter(r=>result[r.id]&&result[r.id].matched).map(r=>`${r.h1}: ${result[r.id].added} new of ${result[r.id].matched}`);
   const us=Object.entries(unknownSites); let msg='BirdGuides import — '+(parts.length?parts.join(' · '):'nothing matched');
-  if(us.length) msg+=` · ${us.reduce((a,[,n])=>a+n,0)} skipped elsewhere`;
+  if(us.length) msg+=REGIONS.some(r=>r.national)?` · ${us.reduce((a,[,n])=>a+n,0)} outside the stretches (England & Wales only)`:` · ${us.reduce((a,[,n])=>a+n,0)} skipped elsewhere`;
   if(Object.keys(unknownSp).length) msg+=` · unmatched: ${Object.keys(unknownSp).join(', ')}`;
   toast(msg, 9000); console.log(msg, unknownSites, unknownSp);
   return result;
@@ -176,6 +178,8 @@ let tilesOk=false;
 function styleLand(){ const st=tilesOk?{color:getCSS('--accent'),weight:1,opacity:.25,fillOpacity:0}:{color:'transparent',fillColor:getCSS('--land'),fillOpacity:1}; landLayer.forEach(l=>l.setStyle(st)); }
 function drawMarkers(recs, single){
   markers.clearLayers(); const g={};
+  const unplaced=recs.filter(r=>!hasPos(r)).length; recs=recs.filter(hasPos);
+  const n0=$('mapnote'); if(unplaced){ n0.textContent=`${unplaced} report${unplaced===1?'':'s'} at sites without map coordinates — see the list`; n0.hidden=false; } else if(/without map/.test(n0.textContent)) n0.hidden=true;
   recs.forEach(r=>{ const k=r.lat.toFixed(4)+','+r.lon.toFixed(4); (g[k]=g[k]||{lat:r.lat,lon:r.lon,rs:[],sites:new Set()}).rs.push(r); g[k].sites.add(r.site); });
   Object.values(g).forEach(gr=>{
     gr.rs.sort((a,b)=>b.dt.localeCompare(a.dt));
@@ -226,7 +230,7 @@ async function updateMap(by){
     $('recs').innerHTML=rs.length?rs.map(r=>`<div class="rec"><div><div class="when">${fmt(r.dt)}</div><div class="src">${r.src==='BG'?'BirdGuides':'eBird'}</div></div>
       <div class="site"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.site)}</a>${r.count?' <span class="when">× '+esc(r.count)+'</span>':''}${r.obs?' <span class="when">seen '+esc(r.obs)+'</span>':''}${r.flags?'<span class="flag">'+esc(r.flags)+'</span>':''}</div>
       ${r.notes?`<div class="note">${esc(r.notes)}</div>`:''}</div>`).join(''):'<div class="empty">No records in this window.</div>';
-    if(rs.length){ map.fitBounds(L.latLngBounds(rs.map(r=>[r.lat,r.lon])).pad(.4),{maxZoom:13}); }
+    const pos=rs.filter(hasPos); if(pos.length){ map.fitBounds(L.latLngBounds(pos.map(r=>[r.lat,r.lon])).pad(.4),{maxZoom:13}); }
   } else {
     const all=[].concat(...Object.keys(by).filter(k=>state.grades.has(gradeOf[k])&&seenOk(seenOf[k],liferOf[k])).map(k=>by[k]));
     drawMarkers(all,false); detail.hidden=true; $('selnote').textContent='Tap a species to map it'; $('selchip').hidden=true;
@@ -249,7 +253,7 @@ async function renderSites(shown,by){
   const detail=$('detail'); $('selchip').hidden=true; const sel=rows.find(r=>r.name===state.area);
   if(sel){ drawMarkers(sel.recs,false); detail.hidden=false; $('ddot').style.setProperty('--c','var(--accent)'); $('dgrade').style.setProperty('--c','var(--muted)'); $('dgrade').textContent=`${sel.count} species`; $('dname').textContent=sel.name;
     $('recs').innerHTML=sel.keys.map(k=>`<div class="rec"><div><div class="when">${fmt(sel.sp[k].last)}</div><div class="src">${sel.sp[k].n} report${sel.sp[k].n===1?'':'s'}</div></div><div class="site"><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${GC[sel.sp[k].g]};margin-right:5px"></span><span class="sp-name">${liferOf[k]?'<span class="star">★</span>':''}${esc(nameOf[k])}</span></div></div>`).join('');
-    map.fitBounds(L.latLngBounds(sel.recs.map(r=>[r.lat,r.lon])).pad(.5),{maxZoom:13}); const chip=$('selchip'); chip.hidden=false; chip.style.setProperty('--c','var(--accent)'); $('chipname').textContent=`${sel.name} · ${sel.count}`; }
+    const pos=sel.recs.filter(hasPos); if(pos.length) map.fitBounds(L.latLngBounds(pos.map(r=>[r.lat,r.lon])).pad(.5),{maxZoom:13}); const chip=$('selchip'); chip.hidden=false; chip.style.setProperty('--c','var(--accent)'); $('chipname').textContent=`${sel.name} · ${sel.count}`; }
   else { drawMarkers([].concat(...rows.filter(A=>!state.skipped.has(A.name)).map(A=>A.recs)),false); detail.hidden=true; }
 }
 
@@ -289,7 +293,7 @@ function handleHash(){
   try{
     if(m[1]==='bg'){ const p=JSON.parse(decodeURIComponent(m[2])); const res=importBG(p);
       // stay on the current stretch if it got reports; otherwise go to the stretch that did
-      const cur=res[REG.id]&&res[REG.id].matched; const best=REGIONS.filter(r=>res[r.id]&&res[r.id].matched).sort((a,b)=>res[b.id].matched-res[a.id].matched)[0];
+      const cur=res[REG.id]&&res[REG.id].matched; const best=REGIONS.filter(r=>!r.national&&res[r.id]&&res[r.id].matched).sort((a,b)=>res[b.id].matched-res[a.id].matched)[0];
       if(!cur && best && best.id!==REG.id){ switchRegion(best.id); } else { loadBG(); buildSpecies(); render(); } }
     else if(m[1]==='yl'){ importYear(decodeURIComponent(m[2]).split('|')); buildSpecies(); render(); }
     else if(m[1]==='ll'){ importLife(decodeURIComponent(m[2]).split('|')); buildSpecies(); render(); }
