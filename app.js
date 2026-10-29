@@ -135,8 +135,11 @@ function importLife(scis){ const codes=new Set(LIFE); let n=0; scis.forEach(s=>{
 function importYear(scis){ const codes=new Set(YEAR); let n=0; scis.forEach(s=>{ const t=BYSCI[s.toLowerCase()]; if(t&&!codes.has(t.c)){ codes.add(t.c); n++; } }); try{ localStorage.setItem('birdmap:yearlist',JSON.stringify({asOf:new Date().toISOString(),codes:[...codes]})); }catch(e){} YEAR=codes; toast(`Year list updated: ${n} new, ${codes.size} total`,6000); }
 
 // ---------- species table ----------
+// Hybrids are left out everywhere (eBird category 'hybrid', or a name/slug saying so)
+const isHybrid=r=>{ const t=TAX[(r.key||'').split('|')[0]]||{}; return t.cat==='hybrid' || /hybrid|\s[x×]\s/i.test(r.name||'') || /hybrid|\s[x×]\s/i.test(t.n||'') || /-x-/.test(r.key||''); };
+const allRecords=()=>bgRecords.concat(ebRecords).filter(r=>!isHybrid(r));
 function buildSpecies(){
-  const all=bgRecords.concat(ebRecords);
+  const all=allRecords();
   const keys=[...new Set(all.map(r=>r.key))];
   gradeOf={}; nameOf={}; seenOf={}; liferOf={};
   SPECIES=keys.map(k=>{ const code=k.split('|')[0]; const sub=k.includes('|'); const t=TAX[code]||{n:code,o:99999,f:'Other'};
@@ -199,7 +202,7 @@ function drawMarkers(recs, single){
 // ---------- rendering ----------
 function inWindow(r){ return (nowMs-Date.parse(r.dt))<=state.hours*3600e3; }
 function visible(r){ return inWindow(r) && (state.src==='all'||r.src===state.src); }
-function currentBySp(){ const by={}; bgRecords.concat(ebRecords).filter(visible).forEach(r=>{(by[r.key]=by[r.key]||[]).push(r);}); return by; }
+function currentBySp(){ const by={}; allRecords().filter(visible).forEach(r=>{(by[r.key]=by[r.key]||[]).push(r);}); return by; }
 function seenOk(seen,lifer){ return state.seen==='all' || (state.seen==='lifer' ? !!lifer : (state.seen==='seen')===!!seen); }
 function shownSpecies(by){ const q=state.q.toLowerCase(); return SPECIES.filter(s=>by[s.key]&&state.grades.has(s.rarity)&&seenOk(s.seen,s.lifer)&&(!q||s.name.toLowerCase().includes(q))); }
 function render(){
