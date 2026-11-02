@@ -95,6 +95,9 @@ function loadBG(){
   const grades=Object.assign({},REG.bg.grades); let recs=REG.bg.records.slice();
   try{ const imp=JSON.parse(localStorage.getItem(lsKey()+':bg')||'null'); if(imp&&imp.records){ const ids=new Set(recs.map(r=>r.id)); imp.records.forEach(r=>{ if(!ids.has(r.id)){ ids.add(r.id); recs.push(r); } }); Object.assign(grades, imp.grades||{}); } }catch(e){}
   REG._grades=grades;
+  // back-fill coordinates for stored reports whose site has since been given a position (national view)
+  const anySite=n=>{ for(const reg of REGIONS){ if(reg.bgSites&&reg.bgSites[n]) return reg.bgSites[n]; } return null; };
+  recs.forEach(r=>{ if(r.lat==null){ const p=anySite(r.site); if(p){ r.lat=p[0]; r.lon=p[1]; } } });
   bgRecords=recs.map(r=>Object.assign({src:'BG',count:''},r));
 }
 // Import from the BirdGuides bookmarklet: #bg=<json>
